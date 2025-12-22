@@ -35,7 +35,7 @@ const messageTimestamps = new Map();        // socket.id → array of timestamps
 const reactions = new Map();                // messageId → Map(emoji → Set(userId))
 
 // CHANGE THIS TO YOUR USER ID AFTER FIRST LOGIN (check server logs)
-const MOD_USER_ID = null; // e.g., 3
+const MOD_USER_ID = null; // e.g., 7
 
 // Initialize
 let userIdCounter = 1;
@@ -69,11 +69,16 @@ app.post('/api/users', (req, res) => {
 
 // Socket Events
 io.on('connection', (socket) => {
-  const clientIP = socket.handshake.address || socket.request.connection.remoteAddress;
+  // Get real client IP (important for banning on Render)
+  const clientIP = socket.handshake.headers['x-forwarded-for']?.split(',')[0].trim() || socket.handshake.address;
   console.log('Client connected:', socket.id, 'IP:', clientIP);
 
+  // Startup test log to confirm new version is running
+  console.log('=== 4CHAIN BACKEND NEW VERSION LOADED - MOD TOOLS, CONFETTI & REACTIONS ACTIVE ===');
+
   if (bannedIPs.has(clientIP)) {
-    socket.emit('error', { message: 'You are banned.' });
+    console.log('Banned IP tried to connect:', clientIP);
+    socket.emit('error', { message: 'You are banned from this chat.' });
     socket.disconnect(true);
     return;
   }
@@ -81,7 +86,10 @@ io.on('connection', (socket) => {
   messageTimestamps.set(socket.id, []);
 
   socket.on('join_board', ({ boardId, user }) => {
-    if (!user || !users.has(user.id)) return;
+    if (!user || !users.has(user.id)) {
+      console.warn('Invalid user attempting to join board:', user);
+      return;
+    }
 
     socket.join(boardId);
 
@@ -109,6 +117,43 @@ io.on('connection', (socket) => {
     });
 
     io.to(boardId).emit('user_count_update', { boardId, count: onlineUsers.length });
+
+    console.log(`${user.username} (ID: ${user.id}) joined /${boardId}/ (online: ${onlineUsers.length})`);
+  });
+
+  socket.on('leave_board', (boardId) => {
+    if (!boardUsers.has(boardId)) return;
+
+    const usersSet = boardUsers.get(boardId);
+    let removedUser = null;
+
+    for (const userInfo of usersSet) {
+      if (userInfo.socketId === socket.id) {
+        removedUser = userInfo;
+        usersSet.delete(userInfo);
+        break;
+      }
+    }
+
+    if (removedUser) {
+      const onlineUsers = Array.from(usersSet).map(u => ({
+        userId: u.userId,
+        username: u.username,
+        avatar: u.avatar
+      }));
+
+      io.to(boardId).emit('online_users_update', {
+        boardId,
+        users: onlineUsers,
+        count: onlineUsers.length
+      });
+
+      io.to(boardId).emit('user_count_update', { boardId, count: onlineUsers.length });
+
+      console.log(`${removedUser.username} left /${boardId}/ (online: ${onlineUsers.length})`);
+    }
+
+    socket.leave(boardId);
   });
 
   socket.on('send_message', ({ boardId, message, userId: messageUserId }) => {
@@ -118,41 +163,47 @@ io.on('connection', (socket) => {
 
     if (timestamps.length > 10) {
       bannedIPs.add(clientIP);
-      console.log('Auto-banned spammer:', clientIP);
+      console.log('AUTO-BANNED SPAMMER:', clientIP);
       socket.emit('error', { message: 'Banned for spamming.' });
       socket.disconnect(true);
       return;
     }
 
     const user = users.get(messageUserId) || users.get(1);
-    const trimmed = message.trim();
+    if (!user) {
+      socket.emit('error', { message: 'Invalid user' });
+      return;
+    }
 
-    // Mod commands
+    const trimmedMessage = message.trim();
+    if (trimmedMessage === '') return;
+
+    // Moderator commands
     if (messageUserId === MOD_USER_ID) {
-      if (trimmed.startsWith('/banip ')) {
-        const ip = trimmed.slice(7).trim();
+      if (trimmedMessage.startsWith('/banip ')) {
+        const ip = trimmedMessage.slice(7).trim();
         bannedIPs.add(ip);
-        console.log('Mod banned IP:', ip);
+        console.log(`MOD BANNED IP: ${ip}`);
         socket.emit('notice', { message: `Banned IP ${ip}` });
         return;
       }
 
-      if (trimmed.startsWith('/ban @')) {
-        const target = trimmed.slice(6).trim();
+      if (trimmedMessage.startsWith('/ban @')) {
+        const targetUsername = trimmedMessage.slice(6).trim();
         boardUsers.forEach((set, bid) => {
           set.forEach(u => {
-            if (u.username === target) {
-              bannedIPs.add(u.socketId === socket.id ? clientIP : 'unknown'); // best effort
+            if (u.username === targetUsername) {
+              const targetIP = u.socketId === socket.id ? clientIP : 'unknown';
+              bannedIPs.add(targetIP);
               io.sockets.sockets.get(u.socketId)?.disconnect(true);
+              console.log(`MOD BANNED USER: ${targetUsername} (IP: ${targetIP})`);
             }
           });
         });
-        socket.emit('notice', { message: `Banned user @${target}` });
+        socket.emit('notice', { message: `Banned user @${targetUsername}` });
         return;
       }
     }
-
-    if (trimmed === '') return;
 
     const messageId = Date.now() + Math.random();
     const messageData = {
@@ -161,7 +212,7 @@ io.on('connection', (socket) => {
       user_id: user.id,
       username: user.username,
       avatar: user.avatar,
-      message: trimmed,
+      message: trimmedMessage,
       timestamp: new Date().toISOString(),
       reactions: {}
     };
@@ -173,13 +224,16 @@ io.on('connection', (socket) => {
 
     io.to(boardId).emit('new_message', messageData);
 
+    console.log(`Message from ${user.username} (ID: ${user.id}) in /${boardId}/: ${trimmedMessage}`);
+
     // Confetti trigger on "based"
-    if (/based/i.test(trimmed)) {
+    if (/based/i.test(trimmedMessage)) {
       io.to(boardId).emit('confetti_trigger', { messageId });
+      console.log('Confetti triggered for "based" message');
     }
   });
 
-  // Reaction emoji
+  // Add reaction
   socket.on('add_reaction', ({ messageId, emoji, userId }) => {
     const user = users.get(userId);
     if (!user) return;
@@ -189,34 +243,37 @@ io.on('connection', (socket) => {
     const msgReactions = reactions.get(messageId);
     if (!msgReactions.has(emoji)) msgReactions.set(emoji, new Set());
 
+    const previousCount = msgReactions.get(emoji).size;
     msgReactions.get(emoji).add(userId);
 
-    // Update all clients
+    const newCount = msgReactions.get(emoji).size;
+
+    // Build reaction data for frontend
     const reactionData = {};
-    msgReactions.forEach((users, emo) => {
-      reactionData[emo] = {
-        count: users.size,
-        users: Array.from(users).map(id => users.get(id)?.username || 'Anonymous')
-      };
+    msgReactions.forEach((userSet, emo) => {
+      reactionData[emo] = userSet.size;
     });
 
-    io.emit('message_reactions_update', { messageId, reactions: reactionData });
+    io.to(currentBoard || boardId).emit('message_reactions_update', { messageId, reactions: reactionData });
+
+    console.log(`${user.username} reacted ${emoji} to message ${messageId} (count: ${newCount})`);
   });
 
   socket.on('disconnect', () => {
     messageTimestamps.delete(socket.id);
 
-    boardUsers.forEach((set, boardId) => {
-      let removed = null;
-      set.forEach(u => {
-        if (u.socketId === socket.id) {
-          removed = u;
-          set.delete(u);
+    boardUsers.forEach((usersSet, boardId) => {
+      let removedUser = null;
+      for (const userInfo of usersSet) {
+        if (userInfo.socketId === socket.id) {
+          removedUser = userInfo;
+          usersSet.delete(userInfo);
+          break;
         }
-      });
+      }
 
-      if (removed) {
-        const onlineUsers = Array.from(set).map(u => ({
+      if (removedUser) {
+        const onlineUsers = Array.from(usersSet).map(u => ({
           userId: u.userId,
           username: u.username,
           avatar: u.avatar
@@ -229,6 +286,8 @@ io.on('connection', (socket) => {
         });
 
         io.to(boardId).emit('user_count_update', { boardId, count: onlineUsers.length });
+
+        console.log(`${removedUser.username} disconnected from /${boardId}/ (online: ${onlineUsers.length})`);
       }
     });
 
@@ -237,8 +296,10 @@ io.on('connection', (socket) => {
 });
 
 // Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 4chain backend with mod tools running on port ${PORT}`);
+  console.log(`🚀 4chain backend with moderation, confetti & reactions running on port ${PORT}`);
 });
