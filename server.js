@@ -34,7 +34,7 @@ const bannedIPs = new Set();                // Banned IPs
 const messageTimestamps = new Map();        // socket.id → array of timestamps (spam detection)
 
 // CHANGE THIS TO YOUR USER ID AFTER FIRST LOGIN (it will stay the same forever now)
-const MOD_USER_ID = null; // e.g., 7
+const MOD_USER_ID = 1541261895; // e.g., 7
 
 // Fixed seed for deterministic ID generation
 function generateUserId(username) {
