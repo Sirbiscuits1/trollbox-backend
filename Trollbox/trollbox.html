@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <title>4chain</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #000000;
+      --panel: #111111;
+      --accent-start: #39ff14;   /* Neon green */
+      --accent-end: #fffc00;     /* Bright neon yellow */
+      --text: #ffffff;
+      --text-dim: #aaaaaa;
+      --glow: 0 0 12px rgba(57, 255, 20, 0.7);
+      --glow-strong: 0 0 24px rgba(57, 255, 20, 0.9);
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: 'Press Start 2P', cursive;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      font-size: 11px;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      position: relative;
+    }
+
+    /* CRT scanline effect */
+    body::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.05) 2px,
+        rgba(0,0,0,0.05) 4px
+      );
+      pointer-events: none;
+      z-index: 999;
+      opacity: 0.6;
+    }
+
+    body {
+      background: linear-gradient(135deg, #000 0%, #001100 25%, #000 50%, #110011 75%, #000 100%);
+      background-size: 400% 400%;
+      animation: gradientWave 30s ease infinite;
+      display: flex;
+      transition: filter 0.8s ease;
+    }
+
+    @keyframes gradientWave {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    /* Blur veil when modal is open */
+    body.blur-veil::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      backdrop-filter: blur(12px);
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 90;
+      pointer-events: none;
+      transition: opacity 0.8s ease;
+    }
+
+    body.blur-veil #main-container,
+    body.blur-veil #sidebar {
+      filter: blur(8px);
+      transition: filter 0.8s ease;
+    }
+
+    #sidebar {
+      width: 200px;
+      background: var(--panel);
+      padding: 16px;
+      border-right: 4px solid var(--accent-start);
+      box-shadow: var(--glow);
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    #sidebar h3 {
+      margin: 0 0 24px 0;
+      font-size: 1.4em;
+      background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: var(--glow);
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    .board-link {
+      display: block;
+      padding: 12px;
+      margin: 8px 0;
+      border: 3px double var(--accent-start);
+      border-radius: 0;
+      background: rgba(57, 255, 20, 0.1);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 0.85em;
+      line-height: 1.4;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .board-link:hover, .board-link.active {
+      background: rgba(57, 255, 20, 0.3);
+      box-shadow: var(--glow);
+      transform: scale(1.05);
+    }
+
+    .board-link span.count {
+      float: right;
+      color: var(--accent-end);
+      font-weight: bold;
+    }
+
+    #main-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #header {
+      padding: 16px;
+      background: var(--panel);
+      border-bottom: 4px solid var(--accent-start);
+      box-shadow: var(--glow);
+      font-size: 1.2em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    #header span:first-child {
+      background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: var(--glow);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    #connection-status {
+      font-size: 0.8em;
+      color: var(--text-dim);
+    }
+
+    #fullscreen-btn {
+      background: none;
+      border: 2px solid var(--accent-start);
+      color: var(--accent-start);
+      font-size: 1.2em;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 0;
+    }
+
+    #chat-area {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+
+    #messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      padding: 12px;
+      background: rgba(20, 20, 20, 0.9);
+      border-left: 4px solid var(--accent-start);
+      box-shadow: var(--glow);
+      max-width: 85%;
+      align-self: flex-start;
+      font-size: 0.9em;
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+
+    .message .avatar {
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    .message .timestamp {
+      color: var(--text-dim);
+      font-size: 0.75em;
+      margin-left: 10px;
+    }
+
+    .greentext span:last-child {
+      color: #39ff14 !important;
+    }
+
+    .message img {
+      max-width: 220px;
+      border: 3px solid var(--accent-start);
+      border-radius: 0;
+      margin-top: 10px;
+      display: block;
+      image-rendering: pixelated;
+      box-shadow: var(--glow);
+    }
+
+    #online-users-pane {
+      width: 180px;
+      background: var(--panel);
+      padding: 16px;
+      border-left: 4px solid var(--accent-start);
+      box-shadow: var(--glow);
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+
+    #online-users-pane h4 {
+      margin: 0 0 16px 0;
+      color: var(--accent-start);
+      text-align: center;
+      text-shadow: var(--glow);
+      font-size: 1em;
+    }
+
+    #online-users-list li {
+      padding: 10px;
+      background: rgba(57, 255, 20, 0.15);
+      margin-bottom: 8px;
+      border: 2px solid var(--accent-start);
+      font-size: 0.85em;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #input-area {
+      display: flex;
+      padding: 12px;
+      background: var(--panel);
+      border-top: 4px solid var(--accent-start);
+      box-shadow: var(--glow);
+      gap: 8px;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    #message-input {
+      flex: 1;
+      padding: 14px;
+      background: #000;
+      border: 3px double var(--accent-start);
+      color: var(--text);
+      font-size: 0.9em;
+      image-rendering: pixelated;
+    }
+
+    #message-input:focus {
+      outline: none;
+      box-shadow: var(--glow-strong);
+    }
+
+    #send-btn, #gif-btn, #emoji-btn {
+      padding: 14px 20px;
+      background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+      color: white;
+      border: 3px double #000;
+      cursor: pointer;
+      font-size: 0.9em;
+      box-shadow: var(--glow);
+      transition: all 0.3s;
+    }
+
+    #gif-btn {
+      font-size: 0.8em;
+    }
+
+    #send-btn:hover, #gif-btn:hover, #emoji-btn:hover {
+      transform: scale(1.1);
+      box-shadow: var(--glow-strong);
+    }
+
+    #gif-panel, #emoji-panel {
+      position: absolute;
+      bottom: 80px;
+      left: 10px;
+      right: 10px;
+      background: var(--panel);
+      border: 4px double var(--accent-start);
+      padding: 16px;
+      max-height: 340px;
+      overflow-y: auto;
+      display: none;
+      z-index: 100;
+      box-shadow: var(--glow-strong);
+    }
+
+    #gif-search-input {
+      width: 100%;
+      padding: 12px;
+      background: #000;
+      border: 3px double var(--accent-start);
+      color: var(--text);
+      margin-bottom: 12px;
+      font-size: 0.9em;
+    }
+
+    .gif-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 10px;
+    }
+
+    .gif-item img {
+      width: 100%;
+      border: 3px solid var(--accent-start);
+      image-rendering: pixelated;
+    }
+
+    .emoji-grid {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 10px;
+      font-size: 1.6em;
+      text-align: center;
+    }
+
+    .emoji-item {
+      cursor: pointer;
+      padding: 8px;
+      border: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .emoji-item:hover {
+      border-color: var(--accent-start);
+      transform: scale(1.2);
+    }
+
+    #username-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      backdrop-filter: blur(4px);
+    }
+
+    .modal-content {
+      background: var(--panel);
+      padding: 60px 40px;
+      border: 6px double var(--accent-start);
+      width: 90%;
+      max-width: 440px;
+      text-align: center;
+      box-shadow: var(--glow-strong);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .modal-content h2 {
+      background: linear-gradient(90deg, var(--accent-start), var(--accent-end));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: var(--glow);
+      margin-bottom: 20px;
+      font-weight: normal;
+      font-size: 1.8em;
+      line-height: 1.4;
+    }
+
+    .modal-content p {
+      margin-bottom: 30px;
+      font-size: 1em;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    .modal-content input {
+      width: 100%;
+      max-width: 360px;
+      padding: 18px;
+      margin: 20px 0;
+      background: #000;
+      border: 4px double var(--accent-start);
+      color: var(--text);
+      font-size: 1.2em;
+      text-align: center;
+    }
+
+    .modal-content button {
+      padding: 18px 50px;
+      background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+      color: white;
+      border: 4px double #000;
+      cursor: pointer;
+      font-weight: normal;
+      font-size: 1.2em;
+      box-shadow: var(--glow);
+      width: 100%;
+      max-width: 360px;
+      margin-top: 10px;
+    }
+
+    #error-msg {
+      color: #ff3366;
+      margin-top: 20px;
+      min-height: 24px;
+      font-weight: normal;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body class="blur-veil">
+  <div id="sidebar"><h3>4chain</h3></div>
+
+  <div id="main-container">
+    <div id="header">
+      <span>/b/ - Random</span>
+      <div id="header-right">
+        <span id="connection-status">Connecting...</span>
+        <button id="fullscreen-btn" title="Toggle Full Screen">⛶</button>
+      </div>
+    </div>
+
+    <div id="chat-area">
+      <div id="messages"></div>
+      
+      <div id="online-users-pane">
+        <h4>Online (<span id="online-count">0</span>)</h4>
+        <ul id="online-users-list"></ul>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <input type="text" id="message-input" placeholder="Type a message..." maxlength="500" disabled />
+      <button id="emoji-btn" disabled>😎</button>
+      <button id="gif-btn" disabled>GIFS</button>
+      <button id="send-btn" disabled>Send</button>
+    </div>
+
+    <div id="gif-panel">
+      <input type="text" id="gif-search-input" placeholder="Search GIFs..." />
+      <div class="gif-grid" id="gif-results">
+        <p style="grid-column:1/-1; text-align:center; color:#888;">Click GIFS to search</p>
+      </div>
+    </div>
+
+    <div id="emoji-panel">
+      <div class="emoji-grid">
+        <div class="emoji-item">😎</div><div class="emoji-item">😂</div><div class="emoji-item">🔥</div><div class="emoji-item">💀</div>
+        <div class="emoji-item">🗿</div><div class="emoji-item">🐸</div><div class="emoji-item">🚽</div><div class="emoji-item">💯</div>
+        <div class="emoji-item">🤡</div><div class="emoji-item">🥀</div><div class="emoji-item">🌸</div><div class="emoji-item">🌈</div>
+        <div class="emoji-item">⚡</div><div class="emoji-item">⛽</div><div class="emoji-item">🚀</div><div class="emoji-item">🌙</div>
+        <div class="emoji-item">⭐</div><div class="emoji-item">🔴</div><div class="emoji-item">🟢</div><div class="emoji-item">🔵</div>
+        <div class="emoji-item">🟡</div><div class="emoji-item">🟠</div><div class="emoji-item">🟣</div><div class="emoji-item">⚠️</div>
+        <div class="emoji-item">❌</div><div class="emoji-item">✅</div><div class="emoji-item">❓</div><div class="emoji-item">❗</div>
+        <div class="emoji-item">🫡</div><div class="emoji-item">🙏</div><div class="emoji-item">🤌</div><div class="emoji-item">👀</div>
+        <div class="emoji-item">🖕</div><div class="emoji-item">👍</div><div class="emoji-item">👎</div><div class="emoji-item">✌️</div>
+        <div class="emoji-item">🤘</div><div class="emoji-item">🖖</div><div class="emoji-item">💩</div><div class="emoji-item">🤓</div>
+        <div class="emoji-item">😭</div><div class="emoji-item">🤬</div><div class="emoji-item">🗣️</div><div class="emoji-item">👑</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="username-modal">
+    <div class="modal-content">
+      <h2>Welcome to 4chain</h2>
+      <p>Choose a username 5-20 characters</p>
+      <input type="text" id="username-input" placeholder="Anonymous" maxlength="20" minlength="5" />
+      <div id="error-msg"></div>
+      <button id="set-username-btn">Enter /b/</button>
+    </div>
+  </div>
+
+  <script>
+    const BACKEND_URL = 'https://trollbox-backend.onrender.com';
+    const socket = io(BACKEND_URL, {
+      transports: ['websocket'],
+      reconnectionAttempts: 5,
+      timeout: 20000
+    });
+
+    // Persistent user ID
+    let currentUser = JSON.parse(localStorage.getItem('4chain_user')) || { id: null, username: 'Anonymous', avatar: 'AN' };
+    let currentBoard = null;
+
+    const header = document.querySelector('#header span:first-child');
+    const connectionStatus = document.getElementById('connection-status');
+    const messagesDiv = document.getElementById('messages');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const emojiBtn = document.getElementById('emoji-btn');
+    const gifBtn = document.getElementById('gif-btn');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const onlineCount = document.getElementById('online-count');
+    const onlineUsersList = document.getElementById('online-users-list');
+    const errorMsg = document.getElementById('error-msg');
+    const gifPanel = document.getElementById('gif-panel');
+    const gifSearchInput = document.getElementById('gif-search-input');
+    const gifResults = document.getElementById('gif-results');
+    const emojiPanel = document.getElementById('emoji-panel');
+
+    // Full-screen toggle
+    fullscreenBtn.onclick = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+          console.log(`Fullscreen error: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', () => {
+      fullscreenBtn.innerHTML = document.fullscreenElement ? '❒' : '⛶';
+    });
+
+    socket.on('connect', () => {
+      connectionStatus.textContent = 'Connected';
+      connectionStatus.style.color = '#39ff14';
+    });
+
+    socket.on('disconnect', () => {
+      connectionStatus.textContent = 'Disconnected';
+      connectionStatus.style.color = '#ff3366';
+      messageInput.disabled = true;
+      sendBtn.disabled = true;
+      emojiBtn.disabled = true;
+      gifBtn.disabled = true;
+    });
+
+    fetch(`${BACKEND_URL}/api/boards`)
+      .then(res => res.json())
+      .then(boards => {
+        const sidebar = document.getElementById('sidebar');
+        boards.forEach(board => {
+          const link = document.createElement('a');
+          link.href = '#';
+          link.className = 'board-link' + (board.id === 'b' ? ' active' : '');
+          link.innerHTML = `/${board.id}/ ${board.name} <span class="count">0</span>`;
+          link.dataset.boardId = board.id;
+          link.onclick = (e) => { e.preventDefault(); switchBoard(board.id, board.name); };
+          sidebar.appendChild(link);
+        });
+      });
+
+    function switchBoard(boardId, boardName) {
+      if (currentBoard) {
+        socket.emit('leave_board', currentBoard);
+        onlineUsersList.innerHTML = '';
+      }
+
+      currentBoard = boardId;
+      header.textContent = `/${boardId}/ - ${boardName}`;
+      messagesDiv.innerHTML = '';
+      onlineCount.textContent = '0';
+
+      document.querySelectorAll('.board-link').forEach(l => l.classList.remove('active'));
+      document.querySelector(`.board-link[data-board-id="${boardId}"]`).classList.add('active');
+
+      fetch(`${BACKEND_URL}/api/boards/${boardId}/messages`)
+        .then(res => res.json())
+        .then(msgs => {
+          msgs.forEach(addMessage);
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+
+      socket.emit('join_board', { boardId, user: currentUser });
+    }
+
+    function getUsernameColor(username) {
+      let hash = 0;
+      for (let i = 0; i < username.length; i++) {
+        hash = username.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash) % 360;
+      return `hsl(${hue}, 85%, 60%)`;
+    }
+
+    function addMessage(msg) {
+      const div = document.createElement('div');
+      div.className = 'message';
+      
+      const time = new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      let content = msg.message
+        .replace(/\n/g, '<br>')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;');
+
+      const urlRegex = /(https?:\/\/.*\.(?:gif|png|jpg|jpeg|webp|webm))/gi;
+      if (urlRegex.test(msg.message.trim())) {
+        const url = msg.message.trim();
+        content = content.replace(urlRegex, '');
+        content += `<br><img src="${url}" alt="sent media">`;
+      }
+
+      const color = getUsernameColor(msg.username);
+
+      div.innerHTML = `
+        <span class="avatar">${msg.avatar}</span>
+        <strong style="color: ${color};">${msg.username}</strong>
+        <span class="timestamp">${time}</span><br>
+        <span>${content}</span>
+      `;
+
+      if (msg.message.startsWith('>')) {
+        div.querySelector('span:last-child').classList.add('greentext');
+      }
+
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    socket.on('online_users_update', ({ boardId, users, count }) => {
+      if (boardId !== currentBoard) {
+        const el = document.querySelector(`.board-link[data-board-id="${boardId}"] span.count`);
+        if (el) el.textContent = count;
+      } else {
+        onlineCount.textContent = count;
+        onlineUsersList.innerHTML = '';
+        if (users.length === 0) {
+          onlineUsersList.innerHTML = '<li style="text-align:center; color:#888;">Just you, anon</li>';
+          return;
+        }
+        users.forEach(u => {
+          const color = getUsernameColor(u.username);
+          const li = document.createElement('li');
+          li.innerHTML = `
+            <span class="avatar">${u.avatar}</span>
+            <strong style="color: ${color};">${u.username}</strong>
+          `;
+          if (u.userId === currentUser.id) {
+            li.innerHTML += ' <span style="color:#39ff14;">(You)</span>';
+          }
+          onlineUsersList.appendChild(li);
+        });
+      }
+    });
+
+    socket.on('user_count_update', ({ boardId, count }) => {
+      const el = document.querySelector(`.board-link[data-board-id="${boardId}"] span.count`);
+      if (el) el.textContent = count;
+    });
+
+    socket.on('new_message', msg => {
+      if (msg.board_id === currentBoard) addMessage(msg);
+    });
+
+    // Confetti on "based"
+    socket.on('confetti_trigger', () => {
+      confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#39ff14', '#fffc00', '#00ff41']
+      });
+    });
+
+    function sendMessage(textOverride = null) {
+      const text = textOverride || messageInput.value.trim();
+      if (!text || !currentBoard) return;
+
+      socket.emit('send_message', {
+        boardId: currentBoard,
+        message: text,
+        userId: currentUser.id
+      });
+
+      if (!textOverride) messageInput.value = '';
+    }
+
+    sendBtn.onclick = () => sendMessage();
+    messageInput.onkeydown = e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    };
+
+    emojiBtn.onclick = (e) => {
+      e.stopPropagation();
+      emojiPanel.style.display = emojiPanel.style.display === 'block' ? 'none' : 'block';
+      gifPanel.style.display = 'none';
+    };
+
+    gifBtn.onclick = (e) => {
+      e.stopPropagation();
+      gifPanel.style.display = gifPanel.style.display === 'block' ? 'none' : 'block';
+      emojiPanel.style.display = 'none';
+      gifSearchInput.focus();
+    };
+
+    document.addEventListener('click', () => {
+      gifPanel.style.display = 'none';
+      emojiPanel.style.display = 'none';
+    });
+
+    document.querySelectorAll('.emoji-item').forEach(item => {
+      item.onclick = (e) => {
+        e.stopPropagation();
+        messageInput.value += item.textContent;
+        messageInput.focus();
+      };
+    });
+
+    gifSearchInput.addEventListener('input', () => {
+      const query = gifSearchInput.value.trim();
+      if (query.length < 2) {
+        gifResults.innerHTML = '<p style="grid-column:1/-1; text-align:center; color:#888;">Type to search...</p>';
+        return;
+      }
+
+      gifResults.innerHTML = '<p style="grid-column:1/-1; text-align:center;">Loading...</p>';
+
+      fetch(`https://api.giphy.com/v1/gifs/search?api_key=DapK7hoT7swicJJUj8oDpF31mt5ZiYIY&q=${encodeURIComponent(query)}&limit=12&rating=pg-13`)
+        .then(res => res.json())
+        .then(data => {
+          gifResults.innerHTML = '';
+          if (data.data.length === 0) {
+            gifResults.innerHTML = '<p style="grid-column:1/-1; text-align:center;">No results 😔</p>';
+            return;
+          }
+          data.data.forEach(gif => {
+            const div = document.createElement('div');
+            div.className = 'gif-item';
+            const img = document.createElement('img');
+            img.src = gif.images.fixed_height_small.url;
+            img.onclick = (e) => {
+              e.stopPropagation();
+              sendMessage(gif.images.original.url);
+              gifPanel.style.display = 'none';
+              gifSearchInput.value = '';
+            };
+            div.appendChild(img);
+            gifResults.appendChild(div);
+          });
+        })
+        .catch(() => {
+          gifResults.innerHTML = '<p style="color:#ff3366; grid-column:1/-1; text-align:center;">Search failed</p>';
+        });
+    });
+
+    document.getElementById('set-username-btn').onclick = () => {
+      let username = document.getElementById('username-input').value.trim();
+
+      if (username.length < 5 && username.length > 0) {
+        errorMsg.textContent = 'Username must be 5-20 characters';
+        return;
+      }
+
+      if (username.length > 20) {
+        errorMsg.textContent = 'Username too long (max 20)';
+        return;
+      }
+
+      if (username === '') username = 'Anonymous';
+
+      fetch(`${BACKEND_URL}/api/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      })
+      .then(res => res.json())
+      .then(user => {
+        currentUser = user;
+        localStorage.setItem('4chain_user', JSON.stringify(currentUser));
+        document.getElementById('username-modal').style.display = 'none';
+        document.body.classList.remove('blur-veil');
+        switchBoard('b', 'Random');
+        messageInput.disabled = false;
+        sendBtn.disabled = false;
+        emojiBtn.disabled = false;
+        gifBtn.disabled = false;
+        messageInput.focus();
+      })
+      .catch(err => {
+        console.warn('Failed to register username', err);
+        currentUser = { id: 1, username: 'Anonymous', avatar: 'AN' };
+        localStorage.setItem('4chain_user', JSON.stringify(currentUser));
+        errorMsg.textContent = 'Using Anonymous';
+        setTimeout(() => {
+          document.getElementById('username-modal').style.display = 'none';
+          document.body.classList.remove('blur-veil');
+          switchBoard('b', 'Random');
+          messageInput.disabled = false;
+          sendBtn.disabled = false;
+          emojiBtn.disabled = false;
+          gifBtn.disabled = false;
+          messageInput.focus();
+        }, 1500);
+      });
+    };
+  </script>
+</body>
+</html>
